@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -121,6 +122,17 @@ inline bool enum_to_string(prefetch_strategy s, std::string& out)
     case prefetch_strategy::opportunistic: out = "opportunistic"; return true;
   }
   return false;
+}
+
+/// TEMPORARY (unified IO POC, step 4): when the environment variable
+/// SIRIUS_POC_LOCAL_ENGINE is "cufile_posix", local files are read through
+/// kvikIO's built-in cufile_posix engine instead of the configured backend.
+/// For testing the engine end to end; removed when engine selection moves into
+/// code (step 10 of the plan).
+[[nodiscard]] inline bool poc_use_cufile_posix() noexcept
+{
+  char const* value = std::getenv("SIRIUS_POC_LOCAL_ENGINE");
+  return value != nullptr && std::string_view{value} == "cufile_posix";
 }
 
 /// IO backend that serves managed reads.
@@ -351,6 +363,7 @@ struct scan_manager_config {
       case io_backend::native: out.backend = cucascade::io::io_backend::native; break;
       case io_backend::cufile: out.backend = cucascade::io::io_backend::cufile; break;
     }
+    if (poc_use_cufile_posix()) { out.backend = cucascade::io::io_backend::cufile_posix; }
     out.uring_n_reactors = uring_n_reactors;
     out.rest_n_reactors  = rest_n_reactors;
 #ifdef CUCASCADE_HAS_CUFILE

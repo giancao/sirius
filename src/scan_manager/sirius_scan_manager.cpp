@@ -98,6 +98,7 @@ char const* to_string(cucascade::io::io_context_type type) noexcept
     case cucascade::io::io_context_type::uring: return "uring";
     case cucascade::io::io_context_type::restful: return "restful";
     case cucascade::io::io_context_type::cufile: return "cufile";
+    case cucascade::io::io_context_type::cufile_posix: return "cufile_posix";
     case cucascade::io::io_context_type::s3rdma: return "s3rdma";
   }
   return "unknown";
@@ -140,7 +141,8 @@ prefetch_strategy backend_prefetch_strategy(cucascade::io::io_context_type type)
     case cucascade::io::io_context_type::restful:
     case cucascade::io::io_context_type::s3rdma: return prefetch_strategy::eager;
     case cucascade::io::io_context_type::uring:
-    case cucascade::io::io_context_type::cufile: return prefetch_strategy::opportunistic;
+    case cucascade::io::io_context_type::cufile:
+    case cucascade::io::io_context_type::cufile_posix: return prefetch_strategy::opportunistic;
   }
   return prefetch_strategy::eager;
 }
@@ -1414,9 +1416,15 @@ sirius_scan_manager::sirius_scan_manager(
       std::to_string(_topology_index->gpu_ids().size()) +
       " GPUs. Set backend=native for multi-GPU runs.");
   }
-  switch (_config.backend) {
-    case scan_manager::io_backend::native:
-      _io_ctx = make_default_ioctx(cucascade::io::io_context_type::uring);
+  if (scan_manager::poc_use_cufile_posix()) {
+    _io_ctx = make_default_ioctx(cucascade::io::io_context_type::cufile_posix);
+    SIRIUS_LOG_WARN(
+      "[sirius_scan_manager] SIRIUS_POC_LOCAL_ENGINE=cufile_posix: local files are read "
+      "through kvikIO's cufile_posix engine");
+  } else
+    switch (_config.backend) {
+      case scan_manager::io_backend::native:
+        _io_ctx = make_default_ioctx(cucascade::io::io_context_type::uring);
       SIRIUS_LOG_DEBUG(
         "[sirius_scan_manager] default io context: uring n_reactors={} slices_per_pass={} "
         "range_batch_slices={}",
@@ -2487,6 +2495,8 @@ sirius_scan_manager::ioctx_failure sirius_scan_manager::explain_ioctx_failure(
       }
       return {.cause = "invalid uring configuration (check uring.n_max_concurrent_scans)",
               .by_configuration = false};
+    case cucascade::io::io_context_type::cufile_posix:
+      return {.cause = "kvikIO's cufile_posix engine could not be created", .by_configuration = false};
     case cucascade::io::io_context_type::cufile:
       return {.cause =
                 "cuFile reader could not be constructed (requires cuCascade built with "
