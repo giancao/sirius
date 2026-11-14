@@ -22,6 +22,12 @@ if(SIRIUS_BUILD_SHARED)
     TARGETS sirius_shared
     EXPORT sirius-targets
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT sirius_library)
+  if(CUCASCADE_KVIKIO_LIBRARY_DIR)
+    install(
+      PROGRAMS "$<TARGET_FILE:kvikio>"
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      COMPONENT sirius_library)
+  endif()
   install(
     EXPORT sirius-targets
     NAMESPACE sirius::

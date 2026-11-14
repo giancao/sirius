@@ -41,7 +41,12 @@ SIRIUS_CMAKE_FLAGS ?= -DCMAKE_C_COMPILER_LAUNCHER=sccache \
 	-DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CUDA_COMPILER_LAUNCHER=sccache \
 	-DCMAKE_LINKER_TYPE=MOLD
 
-build/%/build.ninja: $(CMAKE_INPUTS)
+KVIKIO_SOURCES := cucascade/kvikio/cpp/CMakeLists.txt
+
+$(KVIKIO_SOURCES):
+	git -C cucascade submodule update --init kvikio
+
+build/%/build.ninja: $(CMAKE_INPUTS) | $(KVIKIO_SOURCES)
 	$(CMAKE) --preset $* -DSIRIUS_DUCKDB_SOURCE_DIR="$(abspath $(DUCKDB_DIR))" $(SIRIUS_CMAKE_FLAGS)
 
 release: build/release/build.ninja
