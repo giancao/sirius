@@ -368,7 +368,7 @@ int main(int argc, char** argv)
     auto* host_space = local_mgr->get_memory_space(cucascade::memory::Tier::HOST, 0);
     auto* bounce_mr  = host_space->get_memory_resource_of<cucascade::memory::Tier::HOST>();
 
-    auto ctx = std::make_shared<cucascade::io::uring::uring_reactor::reactor_context>(
+    auto ctx = cucascade::io::uring::make_reactor_context(
       cucascade::io::uring::uring_reactor::reactor_config_type{}, bounce_mr);
     local_io_ctx = std::make_shared<cucascade::io::uring::uring_ioctx>(1, std::move(ctx));
     local_io_ctx->start();

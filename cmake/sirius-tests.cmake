@@ -547,3 +547,23 @@ set_target_properties(
              CXX_STANDARD 20
              CXX_STANDARD_REQUIRED ON
              RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test/io")
+
+# These targets build a uring io context from a reactor context of their own
+# (test/cpp/utils/local_ioctx.hpp and the io benchmarks), which creates kvikIO's
+# io_uring engine directly instead of loading its plugin by name, so they link
+# the plugin. Sirius itself does not.
+if(TARGET kvikio_engine_uring)
+  foreach(
+    _target
+    sirius_unittest
+    parquet_benchmark
+    prefetch_benchmark
+    prefetch_hybrid_scan_benchmark
+    columnar_parquet_poc
+    range_prefetch_benchmark)
+    if(TARGET ${_target})
+      # Plain signature: these targets already use it.
+      target_link_libraries(${_target} kvikio::engine_uring)
+    endif()
+  endforeach()
+endif()
