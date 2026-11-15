@@ -280,7 +280,7 @@ int main(int argc, char** argv)
   auto* bounce_mr  = host_space->get_memory_resource_of<cucascade::memory::Tier::HOST>();
 
   // ---- io context ----------------------------------------------------------
-  auto ctx = std::make_shared<cucascade::io::uring::uring_reactor::reactor_context>(
+  auto ctx = cucascade::io::uring::make_reactor_context(
     cucascade::io::uring::uring_reactor::reactor_config_type{}, bounce_mr);
   auto io_ctx = std::make_shared<cucascade::io::uring::uring_ioctx>(1, std::move(ctx));
   io_ctx->start();
