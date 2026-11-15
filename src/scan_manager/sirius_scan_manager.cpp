@@ -1417,7 +1417,8 @@ sirius_scan_manager::sirius_scan_manager(
   }
   _io_ctx = make_default_ioctx(_ioctx_registry.local_type());
   // Report the context that was built: cuCascade serves local files with
-  // cufile_posix when the uring engine cannot be selected.
+  // cufile_posix when the uring engine cannot be used in this process (its
+  // plugin cannot be loaded, or io_uring is not allowed).
   switch (_io_ctx->type()) {
     case cucascade::io::io_context_type::uring:
       SIRIUS_LOG_DEBUG(
