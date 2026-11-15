@@ -26,7 +26,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdlib>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -124,50 +123,16 @@ inline bool enum_to_string(prefetch_strategy s, std::string& out)
   return false;
 }
 
-/// TEMPORARY (unified IO POC, step 4): when the environment variable
-/// SIRIUS_POC_LOCAL_ENGINE is "cufile_posix", local files are read through
-/// kvikIO's built-in cufile_posix engine instead of the configured backend.
-/// For testing the engine end to end; removed when engine selection moves into
-/// code (step 10 of the plan).
-[[nodiscard]] inline bool poc_use_cufile_posix() noexcept
+/// Parse the @c backend setting: one of cuCascade's @c cucascade::io::io_backend
+/// names (the backends are cuCascade's; Sirius only says which one to use), or
+/// @c "sirius", the deprecated spelling of @c "native", which is still accepted.
+inline bool parse_backend(std::string_view sv, cucascade::io::io_backend& out)
 {
-  char const* value = std::getenv("SIRIUS_POC_LOCAL_ENGINE");
-  return value != nullptr && std::string_view{value} == "cufile_posix";
-}
-
-/// IO backend that serves managed reads.
-enum class io_backend {
-  /// cuCascade's native IO stack: uring for local paths, REST for @c s3:// URLs.
-  native,
-  /// cuFile for local files (with POSIX fallback), REST for @c s3:// URLs.
-  cufile,
-};
-
-/// Parse a @ref io_backend from its lowercase YAML spelling.  @c "sirius" is the
-/// deprecated spelling of @c "native" and is still accepted.
-inline bool string_to_enum(std::string_view sv, io_backend& out)
-{
-  static const std::unordered_map<std::string_view, io_backend> map = {
-    {"native", io_backend::native},
-    {"sirius", io_backend::native},  // deprecated alias
-    {"cufile", io_backend::cufile},
-  };
-  auto it = map.find(sv);
-  if (it != map.end()) {
-    out = it->second;
+  if (sv == "sirius") {
+    out = cucascade::io::io_backend::native;
     return true;
   }
-  return false;
-}
-
-/// Render a @ref io_backend as its canonical lowercase name.
-inline bool enum_to_string(io_backend b, std::string& s)
-{
-  switch (b) {
-    case io_backend::native: s = "native"; return true;
-    case io_backend::cufile: s = "cufile"; return true;
-  }
-  return false;
+  return cucascade::io::string_to_enum(sv, out);
 }
 
 /// What the readahead scan manager is started with, resolved from the config
@@ -233,14 +198,15 @@ struct memory_prefetcher_config {
 /**
  * @brief Configuration for the scan_manager.
  *
- * @c backend selects the IO stack: @ref io_backend::native routes local paths
- * to @c uring_ioctx and @c s3:// URLs to the REST backend (cuCascade's native
- * io_uring HTTP/1.1 transport with kTLS or user-space TLS); @ref io_backend::cufile
- * uses cuFile for local files and the same REST backend for @c s3://. Object-store
- * LIST and glob use the REST backend either way. Reads go through
- * @c cucascade::io::datasource. Raw HTTP(S) URLs are unsupported; use @c s3://
- * paths with an object-store endpoint instead. Multi-GPU forces
- * @ref io_backend::native.
+ * @c backend is cuCascade's @c cucascade::io::io_backend, handed to it as is:
+ * Sirius has no IO backends of its own, it only says which of cuCascade's serves
+ * local files.  @c native is io_uring, @c cufile the cuFile reactor and
+ * @c cufile_posix kvikIO's built-in engine (cuFile where the system supports it,
+ * POSIX otherwise; it needs neither io_uring nor an engine plugin).  @c s3:// URLs
+ * go to cuCascade's REST backend in every case, and so do object-store LIST and
+ * glob. Reads go through @c cucascade::io::datasource. Raw HTTP(S) URLs are
+ * unsupported; use @c s3:// paths with an object-store endpoint instead.
+ * Multi-GPU forces @c native.
  *
  * The backend sub-configs are cuCascade's own structs; @ref to_io_config hands
  * them to the @c cucascade::io::io_context_registry.
@@ -260,8 +226,8 @@ struct scan_manager_config {
   preparation_config preparation;
   exec::thread_pool_config thread_pool{.num_threads        = default_scan_manager_num_threads(),
                                        .thread_name_prefix = "scan_manager"};
-  /// IO backend that serves managed reads.
-  io_backend backend{io_backend::native};
+  /// Which of cuCascade's IO backends serves managed reads.
+  cucascade::io::io_backend backend{cucascade::io::io_backend::native};
 
   /// Number of uring reactors for the local-disk IO path (each one worker thread
   /// and one ring; each allocates its pinned staging at @c ioctx::start()).
@@ -354,16 +320,12 @@ struct scan_manager_config {
   }
 
   /// The cuCascade io configuration for the @c io_context_registry: the backend
-  /// sub-configs and reactor counts copied verbatim, @ref backend mapped onto
-  /// cuCascade's enum, and the cache-derived knobs refreshed.
+  /// choice, sub-configs and reactor counts copied verbatim, and the
+  /// cache-derived knobs refreshed.
   [[nodiscard]] cucascade::io::io_config to_io_config() const
   {
     cucascade::io::io_config out{};
-    switch (backend) {
-      case io_backend::native: out.backend = cucascade::io::io_backend::native; break;
-      case io_backend::cufile: out.backend = cucascade::io::io_backend::cufile; break;
-    }
-    if (poc_use_cufile_posix()) { out.backend = cucascade::io::io_backend::cufile_posix; }
+    out.backend          = backend;
     out.uring_n_reactors = uring_n_reactors;
     out.rest_n_reactors  = rest_n_reactors;
 #ifdef CUCASCADE_HAS_CUFILE

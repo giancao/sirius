@@ -626,7 +626,7 @@ static void from_yaml(const YAML::Node& node, scan_manager::scan_manager_config&
         "'scan_manager.backend': backend: kvikio has been removed; "
         "use backend: native instead");
     }
-    if (!scan_manager::string_to_enum(*backend, opt.backend)) {
+    if (!scan_manager::parse_backend(*backend, opt.backend)) {
       throw std::runtime_error("'scan_manager.backend': invalid enum value '" + *backend + "'");
     }
   }
@@ -1434,13 +1434,13 @@ void sirius_config::enforce_native_backend_for_multi_gpu()
   size_t num_gpus = std::ranges::count_if(_memory_space_configs, [](auto const& space) {
     return std::holds_alternative<cucascade::memory::gpu_memory_space_config>(space);
   });
-  if (num_gpus > 1 && _scan_manager_config.backend != scan_manager::io_backend::native) {
+  if (num_gpus > 1 && _scan_manager_config.backend != cucascade::io::io_backend::native) {
     SIRIUS_LOG_WARN(
       "sirius_config: backend was not 'native' but {} GPUs are configured; "
       "the native backend is required for multi-GPU IO routing. Overriding "
       "backend to 'native'.",
       num_gpus);
-    _scan_manager_config.backend = scan_manager::io_backend::native;
+    _scan_manager_config.backend = cucascade::io::io_backend::native;
   }
 }
 

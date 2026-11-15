@@ -59,8 +59,8 @@
 #ifdef CUCASCADE_HAS_CUFILE
 #include <cucascade/io/cufile/cufile_ioctx.hpp>
 #endif
+#include <cucascade/io/engine_ioctx.hpp>
 #include <cucascade/io/io_context.hpp>
-#include <cucascade/io/rest/rest_ioctx.hpp>
 #include <cucascade/io/uring/uring_ioctx.hpp>
 #include <cucascade/memory/column_metadata.hpp>
 #include <cucascade/memory/memory_reservation_manager.hpp>
@@ -1376,9 +1376,11 @@ sirius_scan_manager::sirius_scan_manager(
     throw std::invalid_argument("[sirius_scan_manager] topology_index must be non-null");
   }
 
-  // The configured local context is mandatory: uring for native, cuFile for
-  // cufile.  The registry routes s3:// paths independently to the REST backend;
-  // there is no catch-all backend for other URL schemes.
+  // The configured local context is mandatory.  Which backend serves local
+  // files under the configured `backend` is cuCascade's answer (the registry's
+  // local_type): uring for native, cuFile for cufile, kvikIO's built-in engine
+  // for cufile_posix.  The registry routes s3:// paths independently to the
+  // REST backend; there is no catch-all backend for other URL schemes.
   //
   // The default ioctx is mandatory, so its failure is thrown rather than logged:
   // the cause is explained once, in the exception.
@@ -1406,22 +1408,18 @@ sirius_scan_manager::sirius_scan_manager(
     }
     return io_ctx;
   };
-  if (_config.backend != scan_manager::io_backend::native &&
+  if (_config.backend != cucascade::io::io_backend::native &&
       _topology_index->gpu_ids().size() > 1) {
     throw std::runtime_error(
       "[sirius_scan_manager] non-native IO does not support multi-GPU; topology reports " +
       std::to_string(_topology_index->gpu_ids().size()) +
       " GPUs. Set backend=native for multi-GPU runs.");
   }
-  if (scan_manager::poc_use_cufile_posix()) {
-    _io_ctx = make_default_ioctx(cucascade::io::io_context_type::cufile_posix);
-    SIRIUS_LOG_WARN(
-      "[sirius_scan_manager] SIRIUS_POC_LOCAL_ENGINE=cufile_posix: local files are read "
-      "through kvikIO's cufile_posix engine");
-  } else
-    switch (_config.backend) {
-      case scan_manager::io_backend::native:
-        _io_ctx = make_default_ioctx(cucascade::io::io_context_type::uring);
+  _io_ctx = make_default_ioctx(_ioctx_registry.local_type());
+  // Report the context that was built: cuCascade serves local files with
+  // cufile_posix when the uring engine cannot be selected.
+  switch (_io_ctx->type()) {
+    case cucascade::io::io_context_type::uring:
       SIRIUS_LOG_DEBUG(
         "[sirius_scan_manager] default io context: uring n_reactors={} slices_per_pass={} "
         "range_batch_slices={}",
@@ -1429,10 +1427,12 @@ sirius_scan_manager::sirius_scan_manager(
         _config.uring.slices_per_pass,
         _config.uring.range_batch_slices);
       break;
-    case scan_manager::io_backend::cufile:
-      _io_ctx = make_default_ioctx(cucascade::io::io_context_type::cufile);
+    case cucascade::io::io_context_type::cufile:
       SIRIUS_LOG_DEBUG("[sirius_scan_manager] default io context: cufile n_reactors={}",
                        _config.cufile_n_reactors);
+      break;
+    default:
+      SIRIUS_LOG_DEBUG("[sirius_scan_manager] default io context: {}", to_string(_io_ctx->type()));
       break;
   }
 
@@ -1450,9 +1450,10 @@ sirius_scan_manager::sirius_scan_manager(
   }
 
   // The `[uring_gauges]` DEBUG sampler polls the uring reactors' gauges; it only
-  // does work while the log sink accepts DEBUG.
-  if (auto uring = std::dynamic_pointer_cast<cucascade::io::uring::uring_ioctx>(_io_ctx)) {
-    _uring_gauges_sampler = std::make_unique<uring_gauges_sampler>(std::move(uring));
+  // does work while the log sink accepts DEBUG.  Whether the context has such
+  // gauges is asked of its engine, not inferred from the backend's class.
+  if (auto gauges = cucascade::io::engine_api<cucascade::io::uring::uring_diagnostics>(_io_ctx)) {
+    _uring_gauges_sampler = std::make_unique<uring_gauges_sampler>(std::move(gauges));
     _uring_gauges_sampler->start();
   }
 }
@@ -2315,12 +2316,12 @@ void sirius_scan_manager::list_objects_paged(
     throw std::runtime_error("sirius_scan_manager::list_objects_paged: malformed prefix URI '" +
                              s3_prefix_uri + "'");
   }
-  auto rest = rest_ioctx_for_list(s3_prefix_uri);
-  if (!rest) {
+  auto listing = object_listing_for(s3_prefix_uri);
+  if (!listing) {
     throw std::runtime_error("sirius_scan_manager::list_objects_paged: '" + s3_prefix_uri +
                              "' does not route to an object-store backend that supports LIST");
   }
-  rest->list_objects_paged(bucket, prefix, page_size, sink, max_scanned);
+  listing->list_objects_paged(bucket, prefix, page_size, sink, max_scanned);
 }
 
 std::size_t sirius_scan_manager::s3_list_max_matches(std::string const& s3_uri)
@@ -2330,12 +2331,12 @@ std::size_t sirius_scan_manager::s3_list_max_matches(std::string const& s3_uri)
     throw std::runtime_error("sirius_scan_manager::s3_list_max_matches: malformed URI '" + s3_uri +
                              "'");
   }
-  auto rest = rest_ioctx_for_list(s3_uri);
-  if (!rest) {
+  auto listing = object_listing_for(s3_uri);
+  if (!listing) {
     throw std::runtime_error("sirius_scan_manager::s3_list_max_matches: '" + s3_uri +
                              "' does not route to an object-store backend that supports LIST");
   }
-  return rest->list_max_matches();
+  return listing->list_max_matches();
 }
 
 std::shared_ptr<cucascade::io::ioctx> sirius_scan_manager::ioctx_for_path(std::string_view path)
@@ -2373,9 +2374,14 @@ std::shared_ptr<cucascade::io::ioctx> sirius_scan_manager::ioctx_for_type(
                                           : std::optional<sirius::io::scoped_object_store_configs::snapshot>{};
   auto const config_id                = snapshot ? snapshot->id : 0;
   auto const cache_key                = routed_ioctx_key{type, config_id};
-  // The local default `_io_ctx` already serves uring/cufile; only an off-default
-  // backend (e.g. s3:// -> restful) needs a separate, lazily-built context.
-  if (_io_ctx && _io_ctx->type() == type && !snapshot) { return _io_ctx; }
+  // The local default `_io_ctx` already serves local files; only an off-default
+  // backend (e.g. s3:// -> restful) needs a separate, lazily-built context.  It
+  // was built for the registry's local type, and it still is the context of that
+  // type when cuCascade served it with another engine (uring unavailable ->
+  // cufile_posix): building a second one here would select the engine again.
+  if (_io_ctx && !snapshot && (type == _io_ctx->type() || type == _ioctx_registry.local_type())) {
+    return _io_ctx;
+  }
 
   {
     std::lock_guard lk{_routed_io_ctxs_mtx};
@@ -2493,7 +2499,8 @@ sirius_scan_manager::ioctx_failure sirius_scan_manager::explain_ioctx_failure(
       return {.cause = "invalid uring configuration (check uring.n_max_concurrent_scans)",
               .by_configuration = false};
     case cucascade::io::io_context_type::cufile_posix:
-      return {.cause = "kvikIO's cufile_posix engine could not be created", .by_configuration = false};
+      return {.cause            = "kvikIO's cufile_posix engine could not be created",
+              .by_configuration = false};
     case cucascade::io::io_context_type::cufile:
       return {.cause =
                 "cuFile reader could not be constructed (requires cuCascade built with "
@@ -2546,11 +2553,11 @@ bool sirius_scan_manager::init_cache_for(cucascade::io::ioctx& io_ctx)
   return true;
 }
 
-std::shared_ptr<cucascade::io::rest::rest_ioctx> sirius_scan_manager::rest_ioctx_for_list(
+std::shared_ptr<cucascade::io::object_listing> sirius_scan_manager::object_listing_for(
   std::string_view path)
 {
-  auto io_ctx = ioctx_for_type(cucascade::io::io_context_type::restful, path);
-  return std::dynamic_pointer_cast<cucascade::io::rest::rest_ioctx>(io_ctx);
+  return cucascade::io::engine_api<cucascade::io::object_listing>(
+    ioctx_for_type(cucascade::io::io_context_type::restful, path));
 }
 
 void sirius_scan_manager::install_s3_config(std::string_view path,

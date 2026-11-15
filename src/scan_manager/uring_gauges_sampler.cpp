@@ -95,8 +95,8 @@ std::optional<std::string> format_gauges_line(std::size_t index,
 }
 
 uring_gauges_sampler::uring_gauges_sampler(
-  std::shared_ptr<cucascade::io::uring::uring_ioctx> io_ctx)
-  : _io_ctx(std::move(io_ctx))
+  std::shared_ptr<cucascade::io::uring::uring_diagnostics> diagnostics)
+  : _diagnostics(std::move(diagnostics))
 {
 }
 
@@ -104,7 +104,7 @@ uring_gauges_sampler::~uring_gauges_sampler() { stop(); }
 
 void uring_gauges_sampler::start()
 {
-  if (_thread.joinable() || !_io_ctx) { return; }
+  if (_thread.joinable() || !_diagnostics) { return; }
   _thread     = std::jthread([this](std::stop_token const& st) { run(st); });
   std::ignore = sirius::exec::thread_util::set_thread_name(_thread, "uring_gauges");
 }
@@ -139,7 +139,7 @@ void uring_gauges_sampler::run(std::stop_token const& stop_token)
     }
 
     auto const now     = clock::now();
-    auto const current = _io_ctx->reactor_gauges();
+    auto const current = _diagnostics->reactor_gauges();
     auto const seconds = std::chrono::duration<double>(now - previous_at).count();
     try {
       for (std::size_t i = 0; i < current.size(); ++i) {

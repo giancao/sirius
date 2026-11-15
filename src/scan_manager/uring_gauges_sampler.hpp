@@ -35,7 +35,7 @@ namespace sirius::scan_manager {
  * @brief One `[uring_gauges]` DEBUG line for reactor @p index, or nullopt when the
  * reactor was idle over the window.
  *
- * @param index The reactor's position in @c uring_ioctx::reactor_gauges().
+ * @param index The reactor's position in @c uring_diagnostics::reactor_gauges().
  * @param current This window's gauges (a @c take_gauges() snapshot).
  * @param previous The previous window's gauges of the same reactor, or nullptr for
  *        the first window (the cumulative started / submitted-bytes deltas are then 0).
@@ -48,10 +48,14 @@ namespace sirius::scan_manager {
   double seconds);
 
 /**
- * @brief Periodic DEBUG logger of a uring ioctx's per-reactor gauges.
+ * @brief Periodic DEBUG logger of the uring engine's per-reactor gauges.
+ *
+ * Built from the gauges interface of the engine serving an ioctx
+ * (`cucascade::io::engine_api<uring_diagnostics>(io_ctx)`), which shares
+ * ownership of that ioctx.
  *
  * A thread named `uring_gauges` wakes every @ref sample_period and, only while the
- * log sink accepts DEBUG, polls @c uring_ioctx::reactor_gauges() and logs one
+ * log sink accepts DEBUG, polls @c uring_diagnostics::reactor_gauges() and logs one
  * @ref format_gauges_line per non-idle reactor.  Above DEBUG it costs a timed
  * wakeup and nothing else, and does not restart the reactors' gauge windows.
  *
@@ -61,7 +65,8 @@ class uring_gauges_sampler {
  public:
   static constexpr std::chrono::milliseconds sample_period{250};
 
-  explicit uring_gauges_sampler(std::shared_ptr<cucascade::io::uring::uring_ioctx> io_ctx);
+  explicit uring_gauges_sampler(
+    std::shared_ptr<cucascade::io::uring::uring_diagnostics> diagnostics);
   ~uring_gauges_sampler();
 
   uring_gauges_sampler(uring_gauges_sampler const&)            = delete;
@@ -78,7 +83,7 @@ class uring_gauges_sampler {
  private:
   void run(std::stop_token const& stop_token);
 
-  std::shared_ptr<cucascade::io::uring::uring_ioctx> _io_ctx;
+  std::shared_ptr<cucascade::io::uring::uring_diagnostics> _diagnostics;
   std::mutex _mutex;
   std::condition_variable_any _cv;
   /// Declared last: its destructor stops and joins the thread before the members
