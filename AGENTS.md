@@ -73,6 +73,12 @@ or user-space TLS, the pinned `fs_cache`, `cucascade::io::datasource`) comes fro
 re-export `cucascade::exec`; `thread_pool.hpp` and `scoped_dispatcher.hpp` retain Sirius's
 priority queues and dispatch-failure handling. The io internals are
 documented in the doc comments of cuCascade's headers under `cucascade/include/cucascade/io/`.
+(Unified I/O POC branch: the engines themselves — io_uring, cuFile, the REST transport — live in
+kvikIO, the `cucascade/kvikio` submodule, as plugins `libkvikio_engine_*.so` installed next to
+`libkvikio.so`; cuCascade loads them by name and keeps the cache and the `ioctx` facade. Sirius
+still reaches I/O only through cuCascade's headers. Test targets that drive reactor classes or
+sign S3 requests themselves link the plugin targets, see the end of `cmake/sirius-tests.cmake`.
+`cucascade/AGENTS.md` describes the split.)
 
 All new work targets Super Sirius. Memory spilling / CPU fallback is handled by the downgrade executor
 (`src/downgrade/`, `src/creator/`); see `docs/super-sirius/memory-management.md`.
