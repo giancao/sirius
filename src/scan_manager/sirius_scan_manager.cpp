@@ -1390,10 +1390,7 @@ sirius_scan_manager::sirius_scan_manager(
       // configured local context is mandatory: construct it through the same
       // public count/config API so its actual failure reaches the caller.
       try {
-        auto context =
-          std::make_shared<cucascade::io::cufile::cufile_reactor::reactor_context>(_config.cufile);
-        return std::make_shared<cucascade::io::cufile::cufile_ioctx>(_config.cufile_n_reactors,
-                                                                     std::move(context));
+        return cucascade::io::cufile::make_cufile_ioctx(_config.cufile_n_reactors, _config.cufile);
       } catch (std::exception const& e) {
         throw std::runtime_error(std::string{"[sirius_scan_manager] failed to create cufile "
                                              "io_context: "} +

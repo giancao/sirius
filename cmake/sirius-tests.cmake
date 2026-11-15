@@ -567,3 +567,9 @@ if(TARGET kvikio_engine_uring)
     endif()
   endforeach()
 endif()
+
+# test/cpp/scan/test_cufile_scan.cpp builds a cufile io context from a reactor
+# context of its own, which creates kvikIO's cufile_reactor engine directly.
+if(TARGET kvikio_engine_cufile_reactor AND TARGET sirius_unittest)
+  target_link_libraries(sirius_unittest kvikio::engine_cufile_reactor)
+endif()

@@ -34,6 +34,12 @@ if(SIRIUS_BUILD_SHARED)
         DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         COMPONENT sirius_library)
     endif()
+    if(TARGET kvikio_engine_cufile_reactor)
+      install(
+        PROGRAMS "$<TARGET_FILE:kvikio_engine_cufile_reactor>"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        COMPONENT sirius_library)
+    endif()
   endif()
   install(
     EXPORT sirius-targets

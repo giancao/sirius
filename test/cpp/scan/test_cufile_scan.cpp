@@ -368,9 +368,11 @@ TEST_CASE("mandatory cuFile construction preserves the actual exception cause",
   REQUIRE_FALSE(cause.empty());
   auto memory = initialize_memory_manager(1);
   sirius::exec::query_lifecycle_registry lifecycle;
-  REQUIRE_THROWS_WITH(
-    (sirius_scan_manager{lifecycle, config, *memory, single_gpu_index()}),
-    Catch::Matchers::ContainsSubstring("failed to create cufile io_context: " + cause));
+  // The engine is selected by name in kvikIO's registry, which reports the
+  // failed selection around the cause; the cause itself must still be there.
+  REQUIRE_THROWS_WITH((sirius_scan_manager{lifecycle, config, *memory, single_gpu_index()}),
+                      Catch::Matchers::ContainsSubstring("failed to create cufile io_context: ") &&
+                        Catch::Matchers::ContainsSubstring(cause));
 }
 
 #endif  // CUCASCADE_HAS_CUFILE
