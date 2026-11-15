@@ -65,7 +65,7 @@ struct scan_manager_fixture {
 scan_manager_config make_s3_rest_config()
 {
   scan_manager_config cfg{};
-  cfg.backend                 = sirius::scan_manager::io_backend::native;
+  cfg.backend                 = cucascade::io::io_backend::native;
   cfg.object_store.endpoint   = require_env("SIRIUS_TEST_S3_ENDPOINT");
   cfg.object_store.region     = env_or("SIRIUS_TEST_S3_REGION", "us-east-1");
   cfg.object_store.access_key = require_env("SIRIUS_TEST_S3_ACCESS_KEY");

@@ -676,7 +676,7 @@ TEST_CASE("cuFile ignores an explicit readahead budget without an eligible backe
   auto topology = single_gpu_index();
   empty_query query;
   auto config               = config_with_readahead_budget(4);
-  config.backend            = sirius::scan_manager::io_backend::cufile;
+  config.backend            = cucascade::io::io_backend::cufile;
   config.cufile.compat_mode = cucascade::io::cufile::compat::on;
   config.cufile.use_odirect = false;
   sirius::exec::query_lifecycle_registry lifecycle;
@@ -830,7 +830,7 @@ TEST_CASE("cuFile does not subscribe readahead or charge reading transitions",
 {
   auto memory               = initialize_memory_manager(1);
   auto config               = config_with_readahead_budget(4);
-  config.backend            = sirius::scan_manager::io_backend::cufile;
+  config.backend            = cucascade::io::io_backend::cufile;
   config.cufile.compat_mode = cucascade::io::cufile::compat::on;
   config.cufile.use_odirect = false;
   auto counters             = std::make_shared<sirius::op::scan::physical_check_counters>();

@@ -76,7 +76,11 @@ documented in the doc comments of cuCascade's headers under `cucascade/include/c
 (Unified I/O POC branch: the engines themselves — io_uring, cuFile, the REST transport — live in
 kvikIO, the `cucascade/kvikio` submodule, as plugins `libkvikio_engine_*.so` installed next to
 `libkvikio.so`; cuCascade loads them by name and keeps the cache and the `ioctx` facade. Sirius
-still reaches I/O only through cuCascade's headers. Test targets that drive reactor classes or
+still reaches I/O only through cuCascade's headers. It has no I/O backend enum of its own:
+`scan_manager.backend` is cuCascade's `io_backend`, parsed with cuCascade's names, and the default
+local context is the one `io_context_registry::local_type()` names. `src/` does not cast an
+`ioctx` to `uring_ioctx` or `rest_ioctx`; it asks for an engine interface with
+`cucascade::io::engine_api<Api>(ctx)` (bucket listing, the uring gauges). Test targets that drive reactor classes or
 sign S3 requests themselves link the plugin targets, see the end of `cmake/sirius-tests.cmake`.
 `cucascade/AGENTS.md` describes the split.)
 

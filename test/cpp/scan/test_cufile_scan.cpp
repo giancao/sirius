@@ -56,9 +56,9 @@
 
 namespace {
 
+using cucascade::io::io_backend;
 using cucascade::io::io_context_type;
 using sirius::op::scan::parquet_source;
-using sirius::scan_manager::io_backend;
 using sirius::scan_manager::scan_manager_config;
 using sirius::scan_manager::sirius_scan_manager;
 using namespace std::chrono_literals;
