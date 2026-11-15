@@ -350,6 +350,49 @@ TEST_CASE("cuFile scan reads and decodes selected Parquet chunks like native", "
   }
 }
 
+// The default local context is the one cuCascade built for the configured backend. That is
+// kvikIO's built-in engine when the setting names it, and also when the uring engine could not
+// be created and cuCascade fell back to it. Either way local files are read through that one
+// context, not through a second one built on first use.
+TEST_CASE("local files are read through the default context, whichever engine serves it",
+          "[cufile_posix][scan][scan_manager]")
+{
+  int device_count = 0;
+  REQUIRE(cudaGetDeviceCount(&device_count) == cudaSuccess);
+  if (device_count == 0) { SKIP("the scan integration requires a CUDA device"); }
+  rmm::cuda_set_device_raii device{rmm::cuda_device_id{0}};
+  sirius::test::scratch_dir directory("cufile_posix_scan");
+  write_parquet(directory);
+  auto const path = directory.file("input.parquet");
+
+  auto config          = reader_config(io_backend::cufile_posix);
+  bool const fell_back = GENERATE(false, true);
+  CAPTURE(fell_back);
+  if (fell_back) {
+    // The uring engine needs at least one reactor: without one it cannot be selected.
+    config                  = reader_config(io_backend::native);
+    config.uring_n_reactors = 0;
+  }
+  auto memory   = initialize_memory_manager(1);
+  auto topology = single_gpu_index();
+  sirius::exec::query_lifecycle_registry lifecycle;
+  sirius_scan_manager manager{lifecycle, config, *memory, topology};
+
+  REQUIRE(manager.io_ctx() != nullptr);
+  CHECK(manager.io_ctx()->type() == io_context_type::cufile_posix);
+  auto source = manager.create_datasource(path);
+  REQUIRE(source);
+  CHECK(source->io_ctx().get() == manager.io_ctx());
+  CHECK(manager.create_datasource("file://" + path)->io_ctx().get() == manager.io_ctx());
+  // Unlike the cuFile reactor, this engine feeds the prefetching cache.
+  CHECK(source->io_ctx()->cache() != nullptr);
+  CHECK(source->uses_fs_cache());
+
+  auto const footer = cudf::io::parquet::fetch_footer_to_host(*source);
+  REQUIRE(footer);
+  CHECK(footer->size() > 0);
+}
+
 TEST_CASE("mandatory cuFile construction preserves the actual exception cause",
           "[cufile][scan][scan_manager]")
 {

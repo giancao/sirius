@@ -1415,9 +1415,10 @@ sirius_scan_manager::sirius_scan_manager(
       std::to_string(_topology_index->gpu_ids().size()) +
       " GPUs. Set backend=native for multi-GPU runs.");
   }
-  auto const local_type = _ioctx_registry.local_type();
-  _io_ctx               = make_default_ioctx(local_type);
-  switch (local_type) {
+  _io_ctx = make_default_ioctx(_ioctx_registry.local_type());
+  // Report the context that was built: cuCascade serves local files with
+  // cufile_posix when the uring engine cannot be selected.
+  switch (_io_ctx->type()) {
     case cucascade::io::io_context_type::uring:
       SIRIUS_LOG_DEBUG(
         "[sirius_scan_manager] default io context: uring n_reactors={} slices_per_pass={} "
@@ -1431,7 +1432,7 @@ sirius_scan_manager::sirius_scan_manager(
                        _config.cufile_n_reactors);
       break;
     default:
-      SIRIUS_LOG_DEBUG("[sirius_scan_manager] default io context: {}", to_string(local_type));
+      SIRIUS_LOG_DEBUG("[sirius_scan_manager] default io context: {}", to_string(_io_ctx->type()));
       break;
   }
 
@@ -2373,9 +2374,14 @@ std::shared_ptr<cucascade::io::ioctx> sirius_scan_manager::ioctx_for_type(
                                           : std::optional<sirius::io::scoped_object_store_configs::snapshot>{};
   auto const config_id                = snapshot ? snapshot->id : 0;
   auto const cache_key                = routed_ioctx_key{type, config_id};
-  // The local default `_io_ctx` already serves uring/cufile; only an off-default
-  // backend (e.g. s3:// -> restful) needs a separate, lazily-built context.
-  if (_io_ctx && _io_ctx->type() == type && !snapshot) { return _io_ctx; }
+  // The local default `_io_ctx` already serves local files; only an off-default
+  // backend (e.g. s3:// -> restful) needs a separate, lazily-built context.  It
+  // was built for the registry's local type, and it still is the context of that
+  // type when cuCascade served it with another engine (uring unavailable ->
+  // cufile_posix): building a second one here would select the engine again.
+  if (_io_ctx && !snapshot && (type == _io_ctx->type() || type == _ioctx_registry.local_type())) {
+    return _io_ctx;
+  }
 
   {
     std::lock_guard lk{_routed_io_ctxs_mtx};
