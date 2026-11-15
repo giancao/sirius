@@ -350,11 +350,16 @@ TEST_CASE("cuFile scan reads and decodes selected Parquet chunks like native", "
   }
 }
 
-// The default local context is the one cuCascade built for the configured backend. That is
-// kvikIO's built-in engine when the setting names it, and also when the uring engine could not
-// be created and cuCascade fell back to it. Either way local files are read through that one
-// context, not through a second one built on first use.
-TEST_CASE("local files are read through the default context, whichever engine serves it",
+// `backend: cufile_posix` reads local files through kvikIO's built-in engine: the default
+// context is that engine's, every local path resolves to it, and unlike the cuFile reactor it
+// feeds the prefetching cache.
+//
+// The same holds when the uring engine's plugin cannot be loaded and cuCascade serves the uring
+// context with this engine instead: the default context then has a type other than the one local
+// paths resolve to, and it must still be the context that reads them (ioctx_for_type compares
+// against the registry's local type). That case needs a process without the plugin, so it is not
+// covered here; it was checked by hand by moving the plugin out of the install directory.
+TEST_CASE("backend cufile_posix reads local files through the default context",
           "[cufile_posix][scan][scan_manager]")
 {
   int device_count = 0;
@@ -365,18 +370,11 @@ TEST_CASE("local files are read through the default context, whichever engine se
   write_parquet(directory);
   auto const path = directory.file("input.parquet");
 
-  auto config          = reader_config(io_backend::cufile_posix);
-  bool const fell_back = GENERATE(false, true);
-  CAPTURE(fell_back);
-  if (fell_back) {
-    // The uring engine needs at least one reactor: without one it cannot be selected.
-    config                  = reader_config(io_backend::native);
-    config.uring_n_reactors = 0;
-  }
   auto memory   = initialize_memory_manager(1);
   auto topology = single_gpu_index();
   sirius::exec::query_lifecycle_registry lifecycle;
-  sirius_scan_manager manager{lifecycle, config, *memory, topology};
+  sirius_scan_manager manager{
+    lifecycle, reader_config(io_backend::cufile_posix), *memory, topology};
 
   REQUIRE(manager.io_ctx() != nullptr);
   CHECK(manager.io_ctx()->type() == io_context_type::cufile_posix);
@@ -384,13 +382,25 @@ TEST_CASE("local files are read through the default context, whichever engine se
   REQUIRE(source);
   CHECK(source->io_ctx().get() == manager.io_ctx());
   CHECK(manager.create_datasource("file://" + path)->io_ctx().get() == manager.io_ctx());
-  // Unlike the cuFile reactor, this engine feeds the prefetching cache.
   CHECK(source->io_ctx()->cache() != nullptr);
   CHECK(source->uses_fs_cache());
 
   auto const footer = cudf::io::parquet::fetch_footer_to_host(*source);
   REQUIRE(footer);
   CHECK(footer->size() > 0);
+}
+
+// A uring engine that exists but cannot be created (here: no reactors) is a configuration error:
+// the mandatory local context fails to build, and nothing else is used in its place.
+TEST_CASE("a uring context that cannot be created fails the scan manager",
+          "[cufile_posix][scan][scan_manager]")
+{
+  auto config             = reader_config(io_backend::native);
+  config.uring_n_reactors = 0;
+  auto memory             = initialize_memory_manager(1);
+  sirius::exec::query_lifecycle_registry lifecycle;
+  REQUIRE_THROWS_WITH((sirius_scan_manager{lifecycle, config, *memory, single_gpu_index()}),
+                      Catch::Matchers::ContainsSubstring("failed to create uring io_context"));
 }
 
 TEST_CASE("mandatory cuFile construction preserves the actual exception cause",
