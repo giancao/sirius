@@ -132,9 +132,6 @@ struct scoped_disk_context {
   scoped_disk_context& operator=(scoped_disk_context const&) = delete;
 };
 
-/// Spill files are written in whole blocks: a file's size is its content's, rounded up to one.
-[[nodiscard]] std::size_t block_padded(std::size_t bytes) { return (bytes + 4095) / 4096 * 4096; }
-
 std::shared_ptr<cucascade::io::ioctx> make_spill_disk_context(cucascade::disk_io_backend backend)
 {
   if (backend == cucascade::disk_io_backend::uring) {
@@ -457,8 +454,7 @@ TEST_CASE("spill compression: GPU -> compressed disk -> GPU, and the file goes w
     CHECK(rep.header_bytes() % 4096 != 0);
     CHECK(rep.get_size_in_bytes() < device_bytes);
     CHECK(rep.get_uncompressed_data_size_in_bytes() == device_bytes);
-    // The file is written in whole blocks: its size is the representation's, block padded.
-    CHECK(fs::file_size(rep.path()) == block_padded(rep.get_size_in_bytes()));
+    CHECK(fs::file_size(rep.path()) == rep.get_size_in_bytes());
     return rep.path();
   }();
   CHECK(fs::exists(path));
@@ -527,8 +523,7 @@ TEST_CASE("spill compression: a compressed host batch moves to disk without a de
     auto const& rep = ro.get_data()->cast<sirius::compressed_disk_representation>();
     CHECK(rep.header_bytes() == header_bytes);
     CHECK(rep.get_size_in_bytes() == header_bytes + payload_bytes);
-    // The file is written in whole blocks: its size is the representation's, block padded.
-    CHECK(fs::file_size(rep.path()) == block_padded(rep.get_size_in_bytes()));
+    CHECK(fs::file_size(rep.path()) == rep.get_size_in_bytes());
     return rep.path();
   }();
   move_to(batch, env().gpu);
@@ -660,7 +655,8 @@ TEST_CASE("spill IO: each disk conversion submits exactly one vectored request",
   CHECK(observed.requested_bytes % 4096 == 0);
   CHECK(observed.inner_bytes == observed.requested_bytes);
   CHECK(observed.last_path == disk->path());
-  CHECK(fs::file_size(disk->path()) == block_padded(disk->get_size_in_bytes()));
+  CHECK(fs::file_size(disk->path()) == disk->get_size_in_bytes());
+  // The padding of the last block is cut off again: the file is as long as its data.
   CHECK(observed.requested_bytes + observed.edge_bytes >= fs::file_size(disk->path()));
   auto decoded =
     input.registry.convert<cucascade::gpu_table_representation>(*disk, env().gpu, env().stream);
@@ -860,8 +856,7 @@ TEST_CASE("spill IO: direct disk decode rejects a truncated header or payload",
   // note_written(). Test both an accurate truncated size and a size made stale after open.
   auto reopened = context->open_io_object(path);
   REQUIRE_FALSE(reopened->writable());
-  REQUIRE(reopened->size() ==
-          (truncate_after_open ? block_padded(disk->get_size_in_bytes()) : truncated_bytes));
+  REQUIRE(reopened->size() == (truncate_after_open ? disk->get_size_in_bytes() : truncated_bytes));
   if (truncate_after_open) { fs::resize_file(path, truncated_bytes); }
   context->next_read_object = reopened;
   auto decode               = [&] {
