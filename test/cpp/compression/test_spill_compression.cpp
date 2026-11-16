@@ -132,6 +132,9 @@ struct scoped_disk_context {
   scoped_disk_context& operator=(scoped_disk_context const&) = delete;
 };
 
+/// Spill files are written in whole blocks: a file's size is its content's, rounded up to one.
+[[nodiscard]] std::size_t block_padded(std::size_t bytes) { return (bytes + 4095) / 4096 * 4096; }
+
 std::shared_ptr<cucascade::io::ioctx> make_spill_disk_context(cucascade::disk_io_backend backend)
 {
   if (backend == cucascade::disk_io_backend::uring) {
@@ -454,7 +457,8 @@ TEST_CASE("spill compression: GPU -> compressed disk -> GPU, and the file goes w
     CHECK(rep.header_bytes() % 4096 != 0);
     CHECK(rep.get_size_in_bytes() < device_bytes);
     CHECK(rep.get_uncompressed_data_size_in_bytes() == device_bytes);
-    CHECK(fs::file_size(rep.path()) == rep.get_size_in_bytes());
+    // The file is written in whole blocks: its size is the representation's, block padded.
+    CHECK(fs::file_size(rep.path()) == block_padded(rep.get_size_in_bytes()));
     return rep.path();
   }();
   CHECK(fs::exists(path));
@@ -523,7 +527,8 @@ TEST_CASE("spill compression: a compressed host batch moves to disk without a de
     auto const& rep = ro.get_data()->cast<sirius::compressed_disk_representation>();
     CHECK(rep.header_bytes() == header_bytes);
     CHECK(rep.get_size_in_bytes() == header_bytes + payload_bytes);
-    CHECK(fs::file_size(rep.path()) == rep.get_size_in_bytes());
+    // The file is written in whole blocks: its size is the representation's, block padded.
+    CHECK(fs::file_size(rep.path()) == block_padded(rep.get_size_in_bytes()));
     return rep.path();
   }();
   move_to(batch, env().gpu);
@@ -641,18 +646,22 @@ TEST_CASE("spill IO: each disk conversion submits exactly one vectored request",
   auto disk           = input.to_disk();
   auto const observed = context->observed();
   CHECK(observed.calls == 1);
+  // The backend only sees whole blocks. The header and the ends of the payload buffers do not
+  // fill blocks: cuCascade's front end assembles those blocks and writes them itself.
   if (via_host) {
-    CHECK(observed.host_slices > 1);  // Header plus pinned payload blocks.
+    CHECK(observed.host_slices >= 1);  // Whole blocks of the pinned payload.
     CHECK(observed.device_slices == 0);
   } else {
-    CHECK(observed.host_slices == 1);  // Header only; payload stays on the device.
+    CHECK(observed.host_slices == 0);  // The payload stays on the device.
     CHECK(observed.device_slices > 0);
   }
-  CHECK(observed.requested_bytes == disk->get_size_in_bytes());
+  CHECK(observed.edge_bytes > 0);
+  CHECK(observed.edge_bytes % 4096 == 0);
+  CHECK(observed.requested_bytes % 4096 == 0);
   CHECK(observed.inner_bytes == observed.requested_bytes);
-  CHECK(observed.header_bytes == disk->header_bytes());
   CHECK(observed.last_path == disk->path());
-  CHECK(fs::file_size(disk->path()) == observed.requested_bytes);
+  CHECK(fs::file_size(disk->path()) == block_padded(disk->get_size_in_bytes()));
+  CHECK(observed.requested_bytes + observed.edge_bytes >= fs::file_size(disk->path()));
   auto decoded =
     input.registry.convert<cucascade::gpu_table_representation>(*disk, env().gpu, env().stream);
   CHECK(digest(decoded->get_table_view()) == expected);
@@ -727,6 +736,18 @@ TEST_CASE("spill IO: delayed failed submission retains the file and encoded buff
   if (!has_gpu()) { return; }
   using namespace std::chrono_literals;
   scoped_settings settings(enabled_settings());
+  // The backend no longer sees the header as a slice of its own, so learn the sizes of the
+  // file from an ordinary conversion of the same input.
+  std::size_t header_bytes     = 0;
+  std::size_t compressed_bytes = 0;
+  {
+    auto probe_context = std::make_shared<sirius::test::spill_io_test_context>();
+    scoped_disk_context probe_install(probe_context);
+    direct_spill_input probe(false);
+    auto const probe_disk = probe.to_disk();
+    header_bytes          = probe_disk->header_bytes();
+    compressed_bytes      = probe_disk->get_size_in_bytes();
+  }
   auto context              = std::make_shared<sirius::test::spill_io_test_context>();
   context->write_completion = sirius::test::spill_io_test_context::completion::failure;
   context->gate             = std::make_shared<sirius::test::spill_write_gate>();
@@ -763,8 +784,8 @@ TEST_CASE("spill IO: delayed failed submission retains the file and encoded buff
     sirius::compressed_disk_representation copy(
       *env().disk,
       copy_path,
-      drained.header_bytes,
-      drained.requested_bytes,
+      header_bytes,
+      compressed_bytes,
       uncompressed_bytes,
       static_cast<std::int64_t>(expected.row_hashes.size()));
     auto decoded =
@@ -839,7 +860,8 @@ TEST_CASE("spill IO: direct disk decode rejects a truncated header or payload",
   // note_written(). Test both an accurate truncated size and a size made stale after open.
   auto reopened = context->open_io_object(path);
   REQUIRE_FALSE(reopened->writable());
-  REQUIRE(reopened->size() == (truncate_after_open ? disk->get_size_in_bytes() : truncated_bytes));
+  REQUIRE(reopened->size() ==
+          (truncate_after_open ? block_padded(disk->get_size_in_bytes()) : truncated_bytes));
   if (truncate_after_open) { fs::resize_file(path, truncated_bytes); }
   context->next_read_object = reopened;
   auto decode               = [&] {
