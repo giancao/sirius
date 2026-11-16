@@ -48,6 +48,7 @@
 #include <cucascade/cudf/datasource.hpp>
 #include <cucascade/cudf/host_data_representation.hpp>
 #include <cucascade/io/datasource_factory.hpp>
+#include <cucascade/io/object_listing.hpp>
 #include <cucascade/io/rest/s3/list_parser.hpp>
 #include <cucascade/memory/memory_space.hpp>
 #include <duckdb/common/column_index.hpp>
@@ -92,9 +93,6 @@ using cucascade::memory::topology_index;
 
 namespace cucascade::io {
 class ioctx;
-namespace rest {
-class rest_ioctx;
-}  // namespace rest
 }  // namespace cucascade::io
 
 namespace sirius::op::scan {
@@ -498,8 +496,9 @@ class sirius_scan_manager {
   /**
    * @brief Construct a new scan manager.
    *
-   * The scan_manager owns a default ioctx for local paths (@c uring_ioctx with
-   * backend=native, @c cufile_ioctx with backend=cufile), built by the
+   * The scan_manager owns a default ioctx for local paths (uring with
+   * backend=native, cuFile with backend=cufile, kvikIO's built-in engine with
+   * backend=cufile_posix), built by the
    * @c cucascade::io::io_context_registry from @p config, plus the backends other
    * paths route to (e.g. the REST ioctx for @c s3://), built lazily on first use.
    * Each ioctx carries its own prefetching cache when @c cache.mode is @c cucs.
@@ -909,7 +908,7 @@ class sirius_scan_manager {
                                  std::optional<std::vector<std::string>> const& cols);
 
   /// \brief Process-wide ioctx used to mint @c cucascade::io::datasource instances.
-  ///        Holds the configured local @c uring_ioctx or @c cufile_ioctx.
+  ///        Holds the configured local context (uring, cuFile or cufile_posix).
   ///        cuFile is single-GPU only.
   [[nodiscard]] cucascade::io::ioctx* io_ctx() const noexcept { return _io_ctx.get(); }
 
@@ -936,9 +935,10 @@ class sirius_scan_manager {
 
   /// \brief Stream ListObjectsV2 pages for @p s3_prefix_uri ("s3://bucket/prefix")
   ///        to @p sink, one call per page; @p sink returns false to stop early.
-  ///        Uses @ref rest_ioctx_for_list (throws a clear error when the REST
+  ///        Uses @ref object_listing_for (throws a clear error when the REST
   ///        backend is not configured). page_size /
-  ///        early-stop semantics are the backend's (@c rest_ioctx::list_objects_paged).
+  ///        early-stop semantics are the backend's
+  ///        (@c cucascade::io::object_listing::list_objects_paged).
   ///        @p max_scanned unset → the backend's configured cap
   ///        (@c rest.list_max_scanned); a value overrides it.
   void list_objects_paged(
@@ -1111,7 +1111,7 @@ class sirius_scan_manager {
   /// Resolve the ioctx that should serve @p path (normalized internally, so callers
   /// — including the scan resolver — may pass a raw `file://` / `s3://` URI),
   /// building it once per backend on first use.  Routes by path through the registry
-  /// so an `s3://` URI reaches the rest_ioctx even when the local default `_io_ctx`
+  /// so an `s3://` URI reaches the REST context even when the local default `_io_ctx`
   /// is uring/cufile.  Returns nullptr when no backend supports the path.
   /// @throws std::invalid_argument for a raw `http://` / `https://` URL (use `s3://`).
   std::shared_ptr<cucascade::io::ioctx> ioctx_for_path(std::string_view path);
@@ -1159,11 +1159,13 @@ class sirius_scan_manager {
   /// was called for (built or not).
   bool init_cache_for(cucascade::io::ioctx& io_ctx);
 
-  /// The REST ioctx, which owns object-store LIST / glob (and serves `s3://` reads).
-  /// Returns nullptr when the object store is not configured, i.e. the REST
-  /// backend cannot be built. The caller shares ownership for the full LIST so
-  /// credential rotation cannot retire the context while a request is in flight.
-  std::shared_ptr<cucascade::io::rest::rest_ioctx> rest_ioctx_for_list(std::string_view path);
+  /// The listing interface of the object-store context that serves @p path: its
+  /// engine owns LIST / glob (and serves the `s3://` reads).  Returns nullptr when
+  /// the object store is not configured, i.e. the REST backend cannot be built,
+  /// or when the engine serving it cannot list. The result shares ownership of
+  /// the context for the full LIST so credential rotation cannot retire it while
+  /// a request is in flight.
+  std::shared_ptr<cucascade::io::object_listing> object_listing_for(std::string_view path);
 
   exec::query_lifecycle_registry& _query_lifecycle;
   scan_manager_config _config;
@@ -1180,8 +1182,8 @@ class sirius_scan_manager {
   native_reader_executor _native_readers;
   coordinator_pool _coordinators;
   std::shared_ptr<cucascade::io::ioctx> _io_ctx;
-  /// `[uring_gauges]` DEBUG sampler of `_io_ctx` when it is a uring ioctx (null
-  /// otherwise).  Stopped in @ref stop, before any ioctx is released.
+  /// `[uring_gauges]` DEBUG sampler of `_io_ctx` when its engine has the uring
+  /// gauges (null otherwise).  Stopped in @ref stop, before any ioctx is released.
   std::unique_ptr<uring_gauges_sampler> _uring_gauges_sampler;
   /// Lazily-built per-backend ioctxs for path-routed datasources (e.g. an s3://
   /// REST context alongside the local `_io_ctx`). Contexts are keyed

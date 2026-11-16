@@ -132,8 +132,7 @@ bool is_local_backend(std::optional<io_context_type> type)
   return type.has_value() && *type == io_context_type::uring;
 }
 
-scan_manager_config make_s3_scan_config(std::string endpoint,
-                                        sirius::scan_manager::io_backend backend)
+scan_manager_config make_s3_scan_config(std::string endpoint, cucascade::io::io_backend backend)
 {
   scan_manager_config cfg{};
   cfg.backend                      = backend;
@@ -515,7 +514,7 @@ class range_s3_server {
 TEST_CASE("io_context_registry routes full paths to their own backends", "[s3][routing]")
 {
   scan_manager_fixture fixture;
-  auto cfg = make_s3_scan_config("http://127.0.0.1:1", sirius::scan_manager::io_backend::native);
+  auto cfg = make_s3_scan_config("http://127.0.0.1:1", cucascade::io::io_backend::native);
   auto const local_path = make_regular_file();
 
   io_context_registry registry{cfg.to_io_config(), *fixture.memory};
@@ -538,8 +537,7 @@ TEST_CASE("io_context_registry routes local paths to uring under backend=native"
   auto const local_path = make_regular_file();
 
   io_context_registry native_registry{
-    make_s3_scan_config("http://127.0.0.1:1", sirius::scan_manager::io_backend::native)
-      .to_io_config(),
+    make_s3_scan_config("http://127.0.0.1:1", cucascade::io::io_backend::native).to_io_config(),
     *fixture.memory};
   CHECK(native_registry.lookup_path(local_path.string()) == io_context_type::uring);
 }
@@ -551,7 +549,7 @@ TEST_CASE("scan_manager concurrent first-touch reuses one routed S3 ioctx", "[s3
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{
     scan_lifecycle,
-    make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native),
+    make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native),
     *fixture.memory,
     fixture.topology};
 
@@ -619,7 +617,7 @@ TEST_CASE("scan_manager planning backend lookup does not open remote objects", "
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{
     scan_lifecycle,
-    make_s3_scan_config("http://127.0.0.1:1", sirius::scan_manager::io_backend::native),
+    make_s3_scan_config("http://127.0.0.1:1", cucascade::io::io_backend::native),
     *fixture.memory,
     fixture.topology};
 
@@ -640,7 +638,7 @@ TEST_CASE("scan_manager rejects raw HTTP and HTTPS URLs with S3 URI guidance", "
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{
     scan_lifecycle,
-    make_s3_scan_config("http://127.0.0.1:1", sirius::scan_manager::io_backend::native),
+    make_s3_scan_config("http://127.0.0.1:1", cucascade::io::io_backend::native),
     *fixture.memory,
     fixture.topology};
 
@@ -668,7 +666,7 @@ TEST_CASE("scan_manager create_datasource normalizes file URI paths before routi
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{
     scan_lifecycle,
-    make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native),
+    make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native),
     *fixture.memory,
     fixture.topology};
 
@@ -684,7 +682,7 @@ TEST_CASE("scan_manager re-primes routed S3 cache on every query", "[s3][routing
 {
   range_s3_server server(std::vector<std::uint8_t>(4096, std::uint8_t{0}));
   scan_manager_fixture fixture;
-  auto cfg       = make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native);
+  auto cfg       = make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native);
   cfg.cache.mode = cucascade::io::cache::cache_mode::cucs;
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{scan_lifecycle, cfg, *fixture.memory, fixture.topology};
@@ -720,7 +718,7 @@ TEST_CASE("scan_manager tolerates a routed S3 ioctx when cache.mode is none", "[
 {
   range_s3_server server(std::vector<std::uint8_t>(4096, std::uint8_t{0}));
   scan_manager_fixture fixture;
-  auto cfg = make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native);
+  auto cfg = make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native);
   REQUIRE_FALSE(cfg.cache.use_fs_cache());
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{scan_lifecycle, cfg, *fixture.memory, fixture.topology};
@@ -742,7 +740,7 @@ TEST_CASE("warmup opens every reactor's connection pool, and only once per bucke
   range_s3_server server(std::vector<std::uint8_t>(4096, std::uint8_t{7}),
                          range_fault_policy{.keep_alive = true});
   scan_manager_fixture fixture;
-  auto cfg = make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native);
+  auto cfg = make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native);
   // One connection per reactor over two reactors: still per-reactor rather than
   // global (each reactor owns its own, thread-confined connection pool).
   cfg.rest.max_connections = 1;
@@ -810,7 +808,7 @@ TEST_CASE("rest_n_reactors 0 sizes the REST pool from the egress NIC", "[s3][rou
 {
   range_s3_server server(std::vector<std::uint8_t>(4096, std::uint8_t{5}));
   scan_manager_fixture fixture;
-  auto cfg = make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native);
+  auto cfg = make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native);
   // Loopback has no queue IRQs to size or place the pool from, so the auto pool
   // falls back to the default count (2), unpinned, whatever this host's real NIC
   // looks like.  An explicit fan-out is only clamped to an auto-sized pool, so
@@ -837,7 +835,7 @@ TEST_CASE("warmup is a no-op for backends with nothing to connect", "[s3][routin
 {
   range_s3_server server(std::vector<std::uint8_t>(4096, std::uint8_t{7}));
   scan_manager_fixture fixture;
-  auto cfg = make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native);
+  auto cfg = make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native);
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{scan_lifecycle, cfg, *fixture.memory, fixture.topology};
 
@@ -858,7 +856,7 @@ TEST_CASE("parquet_gpu_ingestible resolver routes each parquet file independentl
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{
     scan_lifecycle,
-    make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native),
+    make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native),
     *fixture.memory,
     fixture.topology};
 
@@ -897,7 +895,7 @@ TEST_CASE("split_provider resolver routes mixed parquet files independently", "[
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{
     scan_lifecycle,
-    make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native),
+    make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native),
     *fixture.memory,
     fixture.topology};
 
@@ -958,7 +956,7 @@ TEST_CASE("describe_parquet probes the S3 footer on a cold bind and reuses the m
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{
     scan_lifecycle,
-    make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native),
+    make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native),
     *fixture.memory,
     fixture.topology};
   std::string const uri = "s3://footer-bucket/nation.parquet";
@@ -1001,7 +999,7 @@ TEST_CASE("routed S3 cache fill at the object tail is clipped to EOF", "[s3][rou
   }
   range_s3_server server(payload);
   scan_manager_fixture fixture;
-  auto cfg       = make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native);
+  auto cfg       = make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native);
   cfg.cache.mode = cucascade::io::cache::cache_mode::cucs;
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{scan_lifecycle, cfg, *fixture.memory, fixture.topology};
@@ -1031,8 +1029,8 @@ TEST_CASE("scan_manager teardown resolves an in-flight S3 read", "[s3][routing]"
   fault.response_delay = 500ms;
   auto server          = std::make_shared<range_s3_server>(payload, fault);
 
-  auto fixture = std::make_unique<scan_manager_fixture>();
-  auto cfg     = make_s3_scan_config(server->endpoint(), sirius::scan_manager::io_backend::native);
+  auto fixture   = std::make_unique<scan_manager_fixture>();
+  auto cfg       = make_s3_scan_config(server->endpoint(), cucascade::io::io_backend::native);
   auto lifecycle = std::make_shared<sirius::exec::query_lifecycle_registry>();
   auto manager =
     std::make_unique<sirius_scan_manager>(*lifecycle, cfg, *fixture->memory, fixture->topology);
@@ -1106,7 +1104,7 @@ TEST_CASE("backend=native without an object store declines s3 paths and says why
 {
   scan_manager_fixture fixture;
   scan_manager_config cfg{};
-  cfg.backend                 = sirius::scan_manager::io_backend::native;
+  cfg.backend                 = cucascade::io::io_backend::native;
   cfg.thread_pool.num_threads = 1;
   cfg.uring_n_reactors        = 1;
   cfg.cache.mode              = cucascade::io::cache::cache_mode::none;
@@ -1171,7 +1169,7 @@ TEST_CASE("scan_manager retries a routed S3 ioctx after a transient construction
   sirius::exec::query_lifecycle_registry scan_lifecycle;
   sirius_scan_manager manager{
     scan_lifecycle,
-    make_s3_scan_config(server.endpoint(), sirius::scan_manager::io_backend::native),
+    make_s3_scan_config(server.endpoint(), cucascade::io::io_backend::native),
     *fixture.memory,
     fixture.topology};
   auto const uri = std::string{"s3://routing-bucket/data.parquet"};

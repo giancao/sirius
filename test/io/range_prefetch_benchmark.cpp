@@ -248,7 +248,7 @@ io_stack make_io_stack(std::size_t n_reactors)
                                                                          chunks_per_slab,
                                                                          BOUNCE_POOL_SLABS);
 
-  auto ctx = std::make_shared<cucascade::io::uring::uring_reactor::reactor_context>(
+  auto ctx = cucascade::io::uring::make_reactor_context(
     cucascade::io::uring::uring_reactor::reactor_config_type{}, stack.bounce_mr.get());
   stack.io_ctx = std::make_shared<cucascade::io::uring::uring_ioctx>(n_reactors, std::move(ctx));
   stack.io_ctx->start();

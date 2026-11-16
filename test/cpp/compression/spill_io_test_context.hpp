@@ -113,6 +113,8 @@ class spill_io_test_context final : public cucascade::io::ioctx {
     std::size_t requested_bytes{0};
     std::size_t header_bytes{0};
     std::size_t inner_bytes{0};
+    /// Bytes written synchronously, outside a vectored request.
+    std::size_t edge_bytes{0};
     std::size_t read_opens{0};
     std::size_t opened_read_size{0};
     std::size_t host_read_calls{0};
@@ -187,6 +189,10 @@ class spill_io_test_context final : public cucascade::io::ioctx {
   std::size_t min_alignment_requirement() const noexcept override
   {
     return _inner->min_alignment_requirement();
+  }
+  std::size_t write_alignment_requirement() const noexcept override
+  {
+    return _inner->write_alignment_requirement();
   }
   std::size_t merge_gap_size() const noexcept override { return _inner->merge_gap_size(); }
   std::size_t n_max_concurrent_scans() const noexcept override
@@ -272,7 +278,10 @@ class spill_io_test_context final : public cucascade::io::ioctx {
                             std::size_t size,
                             const std::uint8_t* src) override
   {
-    return _inner->host_write_io(obj, offset, size, src);
+    auto const bytes = _inner->host_write_io(obj, offset, size, src);
+    std::lock_guard lock(_mutex);
+    _observed.edge_bytes += bytes;
+    return bytes;
   }
   void flush_io(const cucascade::io::io_object& obj) override { _inner->flush_io(obj); }
   cucascade::exec::semi_future<void> flush_async_io(

@@ -302,7 +302,7 @@ struct sirius_memory_limits {
   std::string disk_capacity{"2 GiB"};
   bool disk_tier{true};
   std::optional<std::string> cache_mode;
-  std::optional<sirius::scan_manager::io_backend> backend;
+  std::optional<cucascade::io::io_backend> backend;
   std::optional<std::string> rest_footer_probe_bytes;
   std::optional<std::size_t> rest_list_max_matches;
 };
@@ -389,7 +389,7 @@ class sirius_config_env_guard {
     }
     if (limits.backend.has_value()) {
       std::string backend_name;
-      REQUIRE(sirius::scan_manager::enum_to_string(*limits.backend, backend_name));
+      REQUIRE(cucascade::io::enum_to_string(*limits.backend, backend_name));
       out << "      backend: " << backend_name << "\n";
     }
     out << "      rest:\n"
@@ -1260,7 +1260,7 @@ TEST_CASE("transparent read_parquet over S3 routes to REST when backend is nativ
   if (should_skip_s3_env(env)) { return; }
 
   sirius_memory_limits limits;
-  limits.backend = sirius::scan_manager::io_backend::native;
+  limits.backend = cucascade::io::io_backend::native;
   s3_sql_fixture fixture(*env, limits);
   set_gpu_execution(fixture.con, true);
 

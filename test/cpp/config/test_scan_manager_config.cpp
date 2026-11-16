@@ -43,12 +43,11 @@
 #include <utility>
 #include <vector>
 
+using cucascade::io::io_backend;
 using cucascade::io::cache::cache_mode;
 using cucascade::io::cache::eviction_policy;
-using sirius::scan_manager::enum_to_string;
-using sirius::scan_manager::io_backend;
+using sirius::scan_manager::parse_backend;
 using sirius::scan_manager::scan_manager_config;
-using sirius::scan_manager::string_to_enum;
 
 namespace {
 
@@ -880,42 +879,45 @@ TEST_CASE("sirius_config reads readahead_strategy", "[scan_manager][config][read
   CHECK_THROWS(cfg.load_from_file(invalid.path()));
 }
 
-TEST_CASE("backend string_to_enum accepts known backends", "[scan_manager][config][backend]")
+// The backends are cuCascade's: the setting takes cuCascade's names, plus one deprecated alias.
+TEST_CASE("the backend setting takes cuCascade's backend names", "[scan_manager][config][backend]")
 {
   io_backend b{};
 
-  REQUIRE(string_to_enum("native", b));
+  REQUIRE(parse_backend("native", b));
   CHECK(b == io_backend::native);
 
-  REQUIRE(string_to_enum("cufile", b));
+  REQUIRE(parse_backend("cufile", b));
   CHECK(b == io_backend::cufile);
 
+  REQUIRE(parse_backend("cufile_posix", b));
+  CHECK(b == io_backend::cufile_posix);
+
   // Deprecated spelling of `native`, still accepted.
-  REQUIRE(string_to_enum("sirius", b));
+  REQUIRE(parse_backend("sirius", b));
   CHECK(b == io_backend::native);
+
+  // Whatever cuCascade names a backend is what the setting accepts.
+  for (auto const backend : {io_backend::native, io_backend::cufile, io_backend::cufile_posix}) {
+    std::string name;
+    REQUIRE(cucascade::io::enum_to_string(backend, name));
+    io_backend parsed{};
+    REQUIRE(parse_backend(name, parsed));
+    CHECK(parsed == backend);
+  }
 }
 
-TEST_CASE("backend string_to_enum rejects unknown backends", "[scan_manager][config][backend]")
+TEST_CASE("the backend setting rejects unknown backends", "[scan_manager][config][backend]")
 {
   io_backend b{};
 
-  CHECK_FALSE(string_to_enum("", b));
-  CHECK_FALSE(string_to_enum("NATIVE", b));
-  CHECK_FALSE(string_to_enum("SIRIUS", b));
-  CHECK_FALSE(string_to_enum("uring", b));
-  CHECK_FALSE(string_to_enum("kvikio", b));
-  CHECK_FALSE(string_to_enum("true", b));
+  CHECK_FALSE(parse_backend("", b));
+  CHECK_FALSE(parse_backend("NATIVE", b));
+  CHECK_FALSE(parse_backend("SIRIUS", b));
+  CHECK_FALSE(parse_backend("uring", b));
+  CHECK_FALSE(parse_backend("kvikio", b));
+  CHECK_FALSE(parse_backend("true", b));
   CHECK(b == io_backend::native);
-}
-
-TEST_CASE("backend enum_to_string returns canonical names", "[scan_manager][config][backend]")
-{
-  std::string out;
-
-  REQUIRE(enum_to_string(io_backend::native, out));
-  CHECK(out == "native");
-  REQUIRE(enum_to_string(io_backend::cufile, out));
-  CHECK(out == "cufile");
 }
 
 TEST_CASE("scan_manager_config defaults to the native backend", "[scan_manager][config][backend]")
@@ -979,6 +981,13 @@ TEST_CASE("to_io_config carries the scan_manager settings into cuCascade's io_co
   CHECK(cfg.to_io_config().rest_n_reactors == 0);
   cfg.backend = io_backend::cufile;
   CHECK(cfg.to_io_config().backend == cucascade::io::io_backend::cufile);
+
+  // The one page-locked allocation outside the HOST budget is the cuFile reactors' fixed
+  // scratch; cuCascade's config reports it, so Sirius can account for it.
+  cfg.cufile_n_reactors = 3;
+  CHECK(cfg.to_io_config().fixed_pinned_overhead_bytes() == 3 * (std::size_t{16} << 20));
+  cfg.backend = io_backend::native;
+  CHECK(cfg.to_io_config().fixed_pinned_overhead_bytes() == 0);
 }
 
 TEST_CASE("sirius_config reads the backend from YAML", "[scan_manager][config][backend]")
@@ -990,6 +999,13 @@ TEST_CASE("sirius_config reads the backend from YAML", "[scan_manager][config][b
   auto const omitted = load_scan_manager("sirius_backend_default.yaml",
                                          scan_manager_yaml("      uring_n_reactors: 2\n"));
   CHECK(omitted.backend == io_backend::native);
+
+  // kvikIO's built-in engine for local files: selected by the setting, handed to cuCascade as is.
+  auto const posix =
+    load_scan_manager("sirius_backend_cufile_posix.yaml",
+                      single_gpu_scan_manager_yaml("      backend: cufile_posix\n"));
+  CHECK(posix.backend == io_backend::cufile_posix);
+  CHECK(posix.to_io_config().backend == io_backend::cufile_posix);
 }
 
 TEST_CASE("sirius_config rejects the removed kvikio backend and block",

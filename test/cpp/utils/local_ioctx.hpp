@@ -56,8 +56,8 @@ inline std::shared_ptr<cucascade::io::ioctx> make_test_local_ioctx()
 {
   namespace uring = cucascade::io::uring;
   auto staging    = std::make_shared<detail::local_ioctx_staging>();
-  auto ctx        = std::make_shared<uring::uring_reactor::reactor_context>(
-    uring::uring_reactor::reactor_config_type{}, &staging->mr);
+  auto ctx = cucascade::io::uring::make_reactor_context(uring::uring_reactor::reactor_config_type{},
+                                                        &staging->mr);
   std::shared_ptr<uring::uring_ioctx> io(
     new uring::uring_ioctx(1, std::move(ctx)),
     [staging = std::move(staging)](uring::uring_ioctx* p) { delete p; });

@@ -22,6 +22,31 @@ if(SIRIUS_BUILD_SHARED)
     TARGETS sirius_shared
     EXPORT sirius-targets
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT sirius_library)
+  if(CUCASCADE_KVIKIO_LIBRARY_DIR)
+    install(
+      PROGRAMS "$<TARGET_FILE:kvikio>"
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      COMPONENT sirius_library)
+    # kvikIO finds its engine plugins by name next to libkvikio.so.
+    if(TARGET kvikio_engine_uring)
+      install(
+        PROGRAMS "$<TARGET_FILE:kvikio_engine_uring>"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        COMPONENT sirius_library)
+    endif()
+    if(TARGET kvikio_engine_cufile_reactor)
+      install(
+        PROGRAMS "$<TARGET_FILE:kvikio_engine_cufile_reactor>"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        COMPONENT sirius_library)
+    endif()
+    if(TARGET kvikio_engine_uring_http)
+      install(
+        PROGRAMS "$<TARGET_FILE:kvikio_engine_uring_http>"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        COMPONENT sirius_library)
+    endif()
+  endif()
   install(
     EXPORT sirius-targets
     NAMESPACE sirius::

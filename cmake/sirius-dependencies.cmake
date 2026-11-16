@@ -7,8 +7,10 @@ if(NOT VCPKG_BUILD)
     cudf::cudf
     INTERFACE "$<$<COMPILE_LANGUAGE:CXX,CUDA>:SHELL:-include variant>")
 endif()
-find_package(raft REQUIRED CONFIG) # raft must be found before cuvs
-find_package(cuvs REQUIRED CONFIG)
+if(VCPKG_BUILD)
+  find_package(raft REQUIRED CONFIG) # raft must be found before cuvs
+  find_package(cuvs REQUIRED CONFIG)
+endif()
 find_package(spdlog REQUIRED CONFIG)
 find_package(yaml-cpp REQUIRED CONFIG)
 # CRoaring decodes Iceberg Puffin deletion vectors (portable Roaring). Host-side
@@ -28,7 +30,7 @@ endif()
 # The static vcpkg build only exports cuvs::cuvs_static; shared cuvs packages
 # already provide cuvs::cuvs. Provide the canonical name when it is missing so
 # both build paths link cuvs::cuvs the same way below.
-if(NOT TARGET cuvs::cuvs)
+if(VCPKG_BUILD AND NOT TARGET cuvs::cuvs)
   add_library(cuvs::cuvs INTERFACE IMPORTED)
   set_target_properties(cuvs::cuvs PROPERTIES INTERFACE_LINK_LIBRARIES
                                               cuvs::cuvs_static)
@@ -123,8 +125,21 @@ set(CUCASCADE_BUILD_IO ON)
 set(CUCASCADE_USE_ABSEIL_INVOCABLE ON)
 set(CUCASCADE_MOODYCAMEL_TARGET duckdb::moodycamel)
 set(CUCASCADE_MOODYCAMEL_NAMESPACE duckdb_moodycamel)
+if(VCPKG_BUILD)
+  set(CUCASCADE_USE_KVIKIO OFF)
+endif()
 add_subdirectory(cucascade "${CMAKE_BINARY_DIR}/cucascade" EXCLUDE_FROM_ALL)
 endblock()
+if(NOT VCPKG_BUILD)
+  find_package(raft REQUIRED CONFIG) # raft must be found before cuvs
+  find_package(cuvs REQUIRED CONFIG)
+endif()
+if(CUCASCADE_KVIKIO_LIBRARY_DIR)
+  foreach(_kind EXE SHARED MODULE)
+    string(PREPEND CMAKE_${_kind}_LINKER_FLAGS
+           "-Wl,-rpath,${CUCASCADE_KVIKIO_LIBRARY_DIR} ")
+  endforeach()
+endif()
 # cuCascade has no C++ modules; scanning breaks older compiler caches.
 # cucascade_io_objects exists only when CUCASCADE_BUILD_IO is ON.
 foreach(target cucascade_objects cucascade_cudf_objects
