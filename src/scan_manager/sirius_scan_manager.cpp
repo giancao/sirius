@@ -1429,8 +1429,13 @@ sirius_scan_manager::sirius_scan_manager(
         _config.uring.range_batch_slices);
       break;
     case cucascade::io::io_context_type::cufile:
-      SIRIUS_LOG_DEBUG("[sirius_scan_manager] default io context: cufile n_reactors={}",
-                       _config.cufile_n_reactors);
+      // The cuFile reactors own a fixed page-locked scratch that is not part of
+      // the HOST budget; cuCascade's config reports its size.
+      SIRIUS_LOG_DEBUG(
+        "[sirius_scan_manager] default io context: cufile n_reactors={} "
+        "pinned_scratch_outside_host_budget_MiB={}",
+        _config.cufile_n_reactors,
+        _config.to_io_config().fixed_pinned_overhead_bytes() >> 20);
       break;
     default:
       SIRIUS_LOG_DEBUG("[sirius_scan_manager] default io context: {}", to_string(_io_ctx->type()));
