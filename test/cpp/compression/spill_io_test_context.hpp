@@ -191,6 +191,10 @@ class spill_io_test_context final : public cucascade::io::ioctx {
   {
     return _inner->min_alignment_requirement();
   }
+  std::size_t write_alignment_requirement() const noexcept override
+  {
+    return _inner->write_alignment_requirement();
+  }
   std::size_t merge_gap_size() const noexcept override { return _inner->merge_gap_size(); }
   std::size_t n_max_concurrent_scans() const noexcept override
   {
