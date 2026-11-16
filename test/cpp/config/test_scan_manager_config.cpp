@@ -981,6 +981,13 @@ TEST_CASE("to_io_config carries the scan_manager settings into cuCascade's io_co
   CHECK(cfg.to_io_config().rest_n_reactors == 0);
   cfg.backend = io_backend::cufile;
   CHECK(cfg.to_io_config().backend == cucascade::io::io_backend::cufile);
+
+  // The one page-locked allocation outside the HOST budget is the cuFile reactors' fixed
+  // scratch; cuCascade's config reports it, so Sirius can account for it.
+  cfg.cufile_n_reactors = 3;
+  CHECK(cfg.to_io_config().fixed_pinned_overhead_bytes() == 3 * (std::size_t{16} << 20));
+  cfg.backend = io_backend::native;
+  CHECK(cfg.to_io_config().fixed_pinned_overhead_bytes() == 0);
 }
 
 TEST_CASE("sirius_config reads the backend from YAML", "[scan_manager][config][backend]")
