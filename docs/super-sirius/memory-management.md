@@ -204,7 +204,13 @@ With `compression.enable_spill_compression` on, `convertible_data_batch::convert
 | `compressed_disk_representation` | `gpu_table_representation` | open once through the source DISK space's ioctx; read the header with cache-unaware host I/O, then read each payload into device memory on the destination stream and decode |
 
 The `.hpln` header/payload byte layout is unchanged, including unaligned boundaries; no
-padding or relocation is introduced. Writers prepare all slices before submitting, await
+padding or relocation is introduced between them. A DISK context that writes with O_DIRECT
+(uring, the cuFile reactor) stores whole blocks only: cuCascade assembles the blocks that take
+bytes from two slices and completes the last block with zeros, in the same request, so the
+file is its content rounded up to a 4 KiB block. The representation records the content's
+length; nothing reads the file's size. Such a context also rejects a request that does not
+start on a block boundary or leaves a hole inside a block, which a `.hpln` never does.
+Writers prepare all slices before submitting, await
 completion and validate the exact byte total. Readers validate header and payload read
 counts before decoding; device I/O honors the caller's stream and GPU binding. The
 context, file object and encoded/pinned/device buffers stay alive until submitted work

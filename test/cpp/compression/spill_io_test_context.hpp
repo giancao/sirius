@@ -113,8 +113,7 @@ class spill_io_test_context final : public cucascade::io::ioctx {
     std::size_t requested_bytes{0};
     std::size_t header_bytes{0};
     std::size_t inner_bytes{0};
-    /// Bytes of the whole blocks cuCascade's front end assembled from the partial blocks of the
-    /// request (the header and the ends of unaligned payload buffers) and wrote itself.
+    /// Bytes written synchronously, outside a vectored request.
     std::size_t edge_bytes{0};
     std::size_t read_opens{0};
     std::size_t opened_read_size{0};
