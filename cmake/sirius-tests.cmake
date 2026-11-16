@@ -555,11 +555,8 @@ set_target_properties(
 if(TARGET kvikio_engine_uring)
   foreach(
     _target
-    sirius_unittest
-    parquet_benchmark
-    prefetch_benchmark
-    prefetch_hybrid_scan_benchmark
-    columnar_parquet_poc
+    sirius_unittest parquet_benchmark prefetch_benchmark
+    prefetch_hybrid_scan_benchmark columnar_parquet_poc
     range_prefetch_benchmark)
     if(TARGET ${_target})
       # Plain signature: these targets already use it.
@@ -574,8 +571,8 @@ if(TARGET kvikio_engine_cufile_reactor AND TARGET sirius_unittest)
   target_link_libraries(sirius_unittest kvikio::engine_cufile_reactor)
 endif()
 
-# The S3 tests sign requests of their own (SigV4) to set up fixtures; the signing
-# code lives in kvikIO's uring_http engine plugin.
+# The S3 tests sign requests of their own (SigV4) to set up fixtures; the
+# signing code lives in kvikIO's uring_http engine plugin.
 if(TARGET kvikio_engine_uring_http AND TARGET sirius_unittest)
   target_link_libraries(sirius_unittest kvikio::engine_uring_http)
 endif()

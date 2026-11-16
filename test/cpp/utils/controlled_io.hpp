@@ -222,7 +222,7 @@ inline void complete_success(cucascade::io::grouped_io_request& request, std::ui
       std::fill_n(std::get<std::uint8_t*>(slice.h_buffer.buffer), slice.size(), value);
     } else {
       for (auto const& fragment : slice.h_buffer.fragments()) {
-        auto* chunk      = cucascade::io::cache::chunk_of(fragment.handle);
+        auto* chunk              = cucascade::io::cache::chunk_of(fragment.handle);
         auto const begin         = std::max(slice.offset(), chunk->offset);
         auto const source_offset = begin - slice.offset();
         auto const chunk_offset  = begin - chunk->offset;
